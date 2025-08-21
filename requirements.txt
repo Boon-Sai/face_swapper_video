@@ -1,0 +1,9 @@
+insightface
+onnxruntime
+opencv-python
+numpy
+matplotlib
+tqdm
+onnxruntime-gpu
+pillow
+ipykernel
