@@ -1,0 +1,2 @@
+[2025-08-25 16:20:37,637] - [exception.py:24] - [INFO] - Entered try block.
+[2025-08-25 16:20:37,637] - [exception.py:13] - [ERROR] - Error occurred in Python Script: [/home/prem/Boonsai/face_swap_video/src/exceptions/exception.py] at line number [25]. Error message: [division by zero]
