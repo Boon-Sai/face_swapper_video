@@ -1,5 +1,5 @@
 venv
 inswapper_128.onnx
-__pycahe__
+__pycache__
 artifacts
 logs
