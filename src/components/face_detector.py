@@ -5,7 +5,6 @@ import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 from sklearn.cluster import DBSCAN
-import moviepy.editor as mp
 
 from src.exceptions.exception import FaceDetectionException
 from src.loggings.logger import logger
@@ -30,10 +29,10 @@ class DetectFaces:
     def extract_audio(self) -> str:
         try:
             logger.info("Extracting audio from video...")
-            audio_path = os.path.join(self.detection_config.face_detection_folder_path, f"{self.video_name}_audio.mp3")
-            ffmpeg.input(self.video_path).output(audio_path, acodec='mp3').run(overwrite_output=True)
-            logger.info(f"Audio extracted and saved to: {audio_path}")
-            return audio_path
+            output_filename = os.path.join(self.detection_config.face_detection_folder_path, f"{self.video_name}_audio.mp3")
+            ffmpeg.input(self.video_path).output(output_filename, acodec='mp3').run()
+            logger.info(f"Audio extracted and saved to: {output_filename}")
+            return output_filename
         except ffmpeg.Error as e:
             raise FaceDetectionException(f"Error extracting audio: {e.stderr.decode()}", sys) from e
         except Exception as e:

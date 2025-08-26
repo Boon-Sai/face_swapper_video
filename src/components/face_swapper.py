@@ -4,7 +4,6 @@ import json
 import cv2
 import insightface
 import numpy as np
-import moviepy.editor as mp
 from insightface.app.common import Face
 
 from src.exceptions.exception import FaceDetectionException
@@ -123,15 +122,16 @@ class SwapFaces:
     def add_audio_to_video(self, video_path: str) -> str:
         try:
             logger.info("Adding audio to the swapped video...")
-            final_video_path = os.path.join(self.swapping_config.face_swapped_video_with_audio, f"{self.video_name}_final.mp4")
             
             input_video = ffmpeg.input(video_path)
             input_audio = ffmpeg.input(self.detection_artifact.extracted_audio_path)
-            
-            ffmpeg.output(input_video['v'], input_audio['a'], final_video_path, vcodec='libx264', acodec='aac').run(overwrite_output=True)
 
-            logger.info(f"Final video with audio saved at: {final_video_path}")
-            return final_video_path
+            output_filename = os.path.join(self.swapping_config.face_swapped_video_with_audio, f"{self.video_name}_final.mp4")
+
+            ffmpeg.concat(input_video, input_audio, v=1, a=1).output(output_filename).run(overwrite_output=True)
+
+            logger.info(f"Video with new audio created successfully at: {output_filename}")
+            return output_filename
         except ffmpeg.Error as e:
             raise FaceDetectionException(f"Error adding audio to video: {e.stderr.decode()}", sys) from e
         except Exception as e:
