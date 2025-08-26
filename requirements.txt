@@ -7,5 +7,5 @@ tqdm
 onnxruntime-gpu
 pillow
 ipykernel
-
 ffmpeg-python
+scikit-learn
