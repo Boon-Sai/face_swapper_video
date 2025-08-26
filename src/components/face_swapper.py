@@ -5,6 +5,8 @@ import cv2
 import insightface
 import numpy as np
 from insightface.app.common import Face
+from insightface.app import FaceAnalysis
+import ffmpeg
 
 from src.exceptions.exception import FaceDetectionException
 from src.loggings.logger import logger
@@ -24,7 +26,7 @@ class SwapFaces:
             self.detection_artifact = detection_artifact
             self.cluster_id_to_swap = cluster_id_to_swap
             
-            self.video_name = os.path.basename(os.path.dirname(self.detection_artifact.detected_faces_path))
+            self.video_name = os.path.basename(self.detection_artifact.detected_faces_path)
             self.output_video_dir = os.path.join(self.swapping_config.face_swapped_video_with_audio, self.video_name)
             os.makedirs(self.output_video_dir, exist_ok=True)
 
@@ -78,18 +80,9 @@ class SwapFaces:
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
 
-    def create_video_from_frames(self, frames_dir: str) -> str:
+    def create_video_from_frames(self, frames_dir: str, original_video_path: str) -> str:
         try:
             logger.info("Creating video from swapped frames...")
-            
-            original_video_path = os.path.join(self.swapping_config.data_folder_path, f"{self.video_name}.mp4")
-            if not os.path.exists(original_video_path):
-                 original_video_path = os.path.join(self.swapping_config.data_folder_path, f"{self.video_name}.webm")
-            if not os.path.exists(original_video_path):
-                for ext in ['.avi', '.mov', '.mkv']:
-                    original_video_path = os.path.join(self.swapping_config.data_folder_path, f"{self.video_name}{ext}")
-                    if os.path.exists(original_video_path):
-                        break
             
             cap = cv2.VideoCapture(original_video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -121,28 +114,30 @@ class SwapFaces:
 
     def add_audio_to_video(self, video_path: str) -> str:
         try:
-            logger.info("Adding audio to the swapped video...")
+            output_filename = os.path.join(self.swapping_config.face_swapped_video_with_audio, f"{self.video_name}_final.mp4")
             
+            if self.detection_artifact.extracted_audio_path is None or not os.path.exists(self.detection_artifact.extracted_audio_path):
+                logger.info("No audio available from the original video. Outputting swapped video without audio.")
+                os.rename(video_path, output_filename)  # Simply rename/move the video without adding audio
+                return output_filename
+
+            logger.info("Adding audio to the swapped video...")
             input_video = ffmpeg.input(video_path)
             input_audio = ffmpeg.input(self.detection_artifact.extracted_audio_path)
-
-            output_filename = os.path.join(self.swapping_config.face_swapped_video_with_audio, f"{self.video_name}_final.mp4")
-
-            ffmpeg.concat(input_video, input_audio, v=1, a=1).output(output_filename).run(overwrite_output=True)
-
-            logger.info(f"Video with new audio created successfully at: {output_filename}")
+            ffmpeg.output(input_video.video, input_audio.audio, output_filename, vcodec='copy', acodec='aac').run(overwrite_output=True)
+            logger.info(f"Video with audio created successfully at: {output_filename}")
             return output_filename
         except ffmpeg.Error as e:
-            raise FaceDetectionException(f"Error adding audio to video: {e.stderr.decode()}", sys) from e
+            error_msg = e.stderr.decode() if e.stderr else "No stderr output available."
+            raise FaceDetectionException(f"Error adding audio to video: {error_msg}", sys) from e
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
-
-    def initiate_face_swapping(self) -> FaceSwappingArtifact:
+    def initiate_face_swapping(self, original_video_path: str) -> FaceSwappingArtifact:
         try:
             logger.info("Initiating face swapping pipeline...")
             source_face = self.get_source_face()
             swapped_frames_dir = self.swap_faces(source_face)
-            swapped_video_path = self.create_video_from_frames(swapped_frames_dir)
+            swapped_video_path = self.create_video_from_frames(swapped_frames_dir, original_video_path)
             final_video_path = self.add_audio_to_video(swapped_video_path)
             
             artifact = FaceSwappingArtifact(final_output_video_path=final_video_path)

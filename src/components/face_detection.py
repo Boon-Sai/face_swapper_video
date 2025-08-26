@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 from sklearn.cluster import DBSCAN
+import ffmpeg
 
 from src.exceptions.exception import FaceDetectionException
 from src.loggings.logger import logger
@@ -28,13 +29,22 @@ class DetectFaces:
 
     def extract_audio(self) -> str:
         try:
+            logger.info("Checking for audio in video...")
+            probe = ffmpeg.probe(self.video_path)
+            has_audio = any(stream['codec_type'] == 'audio' for stream in probe.get('streams', []))
+            if not has_audio:
+                logger.info("No audio stream found in the video. Skipping audio extraction.")
+                return None
+
             logger.info("Extracting audio from video...")
             output_filename = os.path.join(self.detection_config.face_detection_folder_path, f"{self.video_name}_audio.mp3")
             ffmpeg.input(self.video_path).output(output_filename, acodec='mp3').run()
             logger.info(f"Audio extracted and saved to: {output_filename}")
             return output_filename
         except ffmpeg.Error as e:
-            raise FaceDetectionException(f"Error extracting audio: {e.stderr.decode()}", sys) from e
+            error_msg = e.stderr.decode() if e.stderr else "No stderr output available (likely due to missing audio stream or invalid input)."
+            logger.error(f"Error extracting audio: {error_msg}")
+            raise FaceDetectionException(f"Error extracting audio: {error_msg}", sys) from e
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
 
@@ -86,7 +96,6 @@ class DetectFaces:
                 with open(json_path, 'w') as f:
                     json.dump(all_faces_data, f, indent=4)
                 return json_path
-
 
             all_embeddings = np.array(all_embeddings)
             

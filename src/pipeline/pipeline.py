@@ -3,7 +3,7 @@ import sys
 import json
 from collections import Counter
 
-from src.components.face_detector import DetectFaces
+from src.components.face_detection import DetectFaces
 from src.components.face_swapper import SwapFaces
 from src.exceptions.exception import FaceDetectionException
 from src.loggings.logger import logger
@@ -13,9 +13,9 @@ class FaceSwapPipeline:
         self.video_path = video_path
         self.image_path = image_path
 
-    def get_target_cluster_id(self, json_path: str) -> int:
+    def get_target_cluster_id(self, json_path: str, user_cluster_id: int = None) -> int:
         """
-        Finds the most common cluster_id (person) in the video, ignoring noise.
+        Determines the cluster_id to swap. If user provides an ID, uses it; otherwise, finds the most common cluster_id (ignoring noise).
         """
         try:
             logger.info("Determining target cluster ID for face swapping...")
@@ -31,15 +31,18 @@ class FaceSwapPipeline:
             if not cluster_ids:
                 raise Exception("No suitable face clusters found for swapping. Could not identify a main person.")
 
+            if user_cluster_id is not None and user_cluster_id in cluster_ids:
+                logger.info(f"Using user-specified cluster ID: {user_cluster_id}")
+                return user_cluster_id
+
             most_common_cluster = Counter(cluster_ids).most_common(1)[0][0]
-            logger.info(f"Identified most prominent person with cluster ID: {most_common_cluster}")
+            logger.info(f"Identified most prominent person with cluster ID: {most_common_cluster} (default selection)")
             return most_common_cluster
 
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
 
-
-    def run(self):
+    def run(self, user_cluster_id: int = None):
         try:
             logger.info("Starting Face Swap Pipeline...")
 
@@ -48,19 +51,19 @@ class FaceSwapPipeline:
             detection_artifact = face_detector.initiate_face_detection()
 
             if detection_artifact.json_information is None or not os.path.exists(detection_artifact.json_information):
-                 logger.info("Face detection did not produce a valid JSON output. Aborting pipeline.")
-                 return
+                logger.info("Face detection did not produce a valid JSON output. Aborting pipeline.")
+                return None
 
-            # Step 2: Determine which person to swap
-            target_cluster_id = self.get_target_cluster_id(detection_artifact.json_information)
+            # Step 2: Determine which person to swap (allow user input)
+            target_cluster_id = self.get_target_cluster_id(detection_artifact.json_information, user_cluster_id)
 
-            # Step 3: Swap the faces
+            # Step 3: Swap the faces (pass original video_path for FPS retrieval)
             face_swapper = SwapFaces(
                 source_image_path=self.image_path,
                 detection_artifact=detection_artifact,
                 cluster_id_to_swap=target_cluster_id
             )
-            swapping_artifact = face_swapper.initiate_face_swapping()
+            swapping_artifact = face_swapper.initiate_face_swapping(original_video_path=self.video_path)
 
             logger.info("Face Swap Pipeline completed successfully!")
             logger.info(f"Final video saved at: {swapping_artifact.final_output_video_path}")

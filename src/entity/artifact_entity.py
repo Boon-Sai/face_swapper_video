@@ -9,4 +9,3 @@ class FaceDetectionArtifact:
 @dataclass
 class FaceSwappingArtifact:
     final_output_video_path: str
-    

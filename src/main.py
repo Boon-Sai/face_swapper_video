@@ -1,41 +1,20 @@
 import argparse
-import sys
-import os
-
-# This is a bit of a hack to make sure src is in the python path
-# A better way would be to install the project as a package
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-
 from src.pipeline.pipeline import FaceSwapPipeline
 from src.loggings.logger import logger
-from src.exceptions.exception import FaceDetectionException
 
-def main(video_path: str, image_path: str):
-    try:
-        pipeline = FaceSwapPipeline(video_path=video_path, image_path=image_path)
-        pipeline.run()
-    except FaceDetectionException as e:
-        logger.error(f"A controlled exception occurred: {e}")
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the Face Swapping pipeline.")
-    parser.add_argument("--video", type=str, required=True, help="Path to the target video file.")
-    parser.add_argument("--image", type=str, required=True, help="Path to the source image file with the face to swap in.")
+def main():
+    parser = argparse.ArgumentParser(description="Run the Face Swap Pipeline.")
+    parser.add_argument("--video_path", type=str, required=True, help="Path to the input video file.")
+    parser.add_argument("--image_path", type=str, required=True, help="Path to the source image file for face swapping.")
+    parser.add_argument("--cluster_id", type=int, default=None, help="Optional: Specific cluster ID to swap (otherwise, uses the most prominent).")
 
     args = parser.parse_args()
 
-    # Basic validation
-    if not os.path.exists(args.video):
-        print(f"Error: Video file not found at '{args.video}'")
-        sys.exit(1)
-    if not os.path.exists(args.image):
-        print(f"Error: Image file not found at '{args.image}'")
-        sys.exit(1)
+    pipeline = FaceSwapPipeline(video_path=args.video_path, image_path=args.image_path)
+    final_video_path = pipeline.run(user_cluster_id=args.cluster_id)
 
-    logger.info("Starting application...")
-    main(video_path=args.video, image_path=args.image)
-    logger.info("Application finished.")
+    if final_video_path:
+        logger.info(f"Pipeline executed successfully. Output: {final_video_path}")
+
+if __name__ == "__main__":
+    main()

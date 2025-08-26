@@ -27,13 +27,13 @@ class FaceDetectionConfig:
         
         # face detection main folder
         self.face_detection_folder_path = os.path.join(
-            self.artifact_dir_path,"face_datection"
+            self.artifact_dir_path, "face_detection"
         )
 
         os.makedirs(self.face_detection_folder_path, exist_ok=True)
 
         self.detected_faces = os.path.join(
-            self.face_detection_folder_path,"detected_faces" 
+            self.face_detection_folder_path, "detected_faces" 
         )
 
         os.makedirs(self.detected_faces, exist_ok=True)
@@ -48,7 +48,3 @@ class FaceSwappingConfig:
             self.artifact_folder_path, "face_swapped_video_with_audio"
         )
         os.makedirs(self.face_swapped_video_with_audio, exist_ok=True)
-
-
-
-        

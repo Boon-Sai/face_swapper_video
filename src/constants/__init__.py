@@ -23,6 +23,5 @@ DET_SIZE = (640, 640)
 
 DIRECT_URL = "https://drive.usercontent.google.com/download?id=1krOLgjW2tAPaqV-Bw4YALz0xT5zlb5HF&export=download&authuser=0"
 
-
 CLUSTERING_MODEL = "DBSCAN"
-AUDIO_MODEL = "ffmgep"
+AUDIO_MODEL = "ffmpeg"
