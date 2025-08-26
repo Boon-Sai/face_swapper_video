@@ -1,7 +1,7 @@
 from src.loggings import logger
 import sys
 
-class WordSearchException(Exception):
+class FaceDetectionException(Exception):
     def __init__(self, error_message: str, error_details):
         super().__init__(error_message)
         _, _, exc_tb = error_details.exc_info()
@@ -24,4 +24,4 @@ if __name__ == "__main__":
         logger.logger.info("Entered try block.")
         result = 1 / 0  # This will throw ZeroDivisionError
     except Exception as e:
-        raise WordSearchException(str(e), sys)
+        raise FaceDetectionException(str(e), sys)

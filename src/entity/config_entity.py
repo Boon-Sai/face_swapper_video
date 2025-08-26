@@ -21,6 +21,9 @@ class FaceDetectionConfig:
     def __init__(self, config: ConfigEntity):
         self.data_dir_path = config.data_dir_path
         self.artifact_dir_path = config.artifacts_dir_path
+        self.face_detection_model = config.face_detection_model
+        self.ctx_id = config.ctx_id
+        self.det_size = config.det_size
         
         # face detection main folder
         self.face_detection_folder_path = os.path.join(
@@ -39,6 +42,7 @@ class FaceSwappingConfig:
     def __init__(self, config: ConfigEntity):
         self.data_folder_path = config.data_dir_path
         self.artifact_folder_path = config.artifacts_dir_path
+        self.face_swapper_model = config.face_swapping_model
 
         self.face_swapped_video_with_audio = os.path.join(
             self.artifact_folder_path, "face_swapped_video_with_audio"
