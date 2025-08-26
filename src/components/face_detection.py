@@ -21,8 +21,9 @@ class DetectFaces:
             self.face_detector_model.prepare(ctx_id=self.detection_config.ctx_id, det_size=self.detection_config.det_size)
             self.video_path = video_path
             self.video_name = os.path.splitext(os.path.basename(video_path))[0]
-            self.output_dir = os.path.join(self.detection_config.detected_faces, self.video_name)
-            os.makedirs(self.output_dir, exist_ok=True)
+            # Store raw frames in a dedicated frames folder (not in unique faces directory)
+            self.frames_dir = os.path.join(self.detection_config.face_detection_folder_path, "frames", self.video_name)
+            os.makedirs(self.frames_dir, exist_ok=True)
             logger.info(f"Face Detection configurations invoked successfully with model path: {self.detection_config.face_detection_model}")
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
@@ -58,7 +59,7 @@ class DetectFaces:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                frame_path = os.path.join(self.output_dir, f"frame_{frame_count:04d}.jpg")
+                frame_path = os.path.join(self.frames_dir, f"frame_{frame_count:04d}.jpg")
                 cv2.imwrite(frame_path, frame)
                 frame_paths.append(frame_path)
                 frame_count += 1
@@ -74,6 +75,8 @@ class DetectFaces:
             all_faces_data = {}
             all_embeddings = []
             face_indices = []
+            # Track best representative per cluster while iterating (frame_path, face_index, det_score)
+            cluster_best_representative = {}
 
             for i, frame_path in enumerate(frame_paths):
                 frame = cv2.imread(frame_path)
@@ -106,12 +109,39 @@ class DetectFaces:
             for i, label in enumerate(labels):
                 frame_path, face_index = face_indices[i]
                 all_faces_data[frame_path][face_index]['cluster_id'] = int(label)
+                # Update best representative per non-noise cluster
+                if int(label) != -1:
+                    det_score = all_faces_data[frame_path][face_index]['det_score']
+                    best = cluster_best_representative.get(int(label))
+                    if best is None or det_score > best[2]:
+                        cluster_best_representative[int(label)] = (frame_path, face_index, det_score)
 
             json_path = os.path.join(self.detection_config.face_detection_folder_path, f"{self.video_name}_face_data.json")
             with open(json_path, 'w') as f:
                 json.dump(all_faces_data, f, indent=4)
             
             logger.info(f"Face detection and clustering data saved to: {json_path}")
+
+            # Save unique representative face crops per cluster
+            try:
+                unique_faces_dir = os.path.join(self.detection_config.face_detection_folder_path, "unique_faces", self.video_name)
+                os.makedirs(unique_faces_dir, exist_ok=True)
+                for cluster_id, (rep_frame_path, rep_face_index, _) in cluster_best_representative.items():
+                    frame_img = cv2.imread(rep_frame_path)
+                    if frame_img is None:
+                        continue
+                    bbox = all_faces_data[rep_frame_path][rep_face_index]['bbox']
+                    x1, y1, x2, y2 = map(int, bbox)
+                    x1 = max(0, x1); y1 = max(0, y1)
+                    x2 = min(frame_img.shape[1], x2); y2 = min(frame_img.shape[0], y2)
+                    crop = frame_img[y1:y2, x1:x2]
+                    if crop.size == 0:
+                        continue
+                    out_path = os.path.join(unique_faces_dir, f"cluster_{cluster_id}.jpg")
+                    cv2.imwrite(out_path, crop)
+                logger.info(f"Saved unique face representatives to: {unique_faces_dir}")
+            except Exception as crop_err:
+                logger.warning(f"Failed to save unique face crops: {crop_err}")
             return json_path
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
@@ -124,7 +154,7 @@ class DetectFaces:
             json_path = self.detect_and_cluster_faces(frame_paths)
             
             artifact = FaceDetectionArtifact(
-                detected_faces_path=self.output_dir,
+                detected_faces_path=self.frames_dir,
                 json_information=json_path,
                 extracted_audio_path=audio_path
             )
