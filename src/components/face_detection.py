@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import cv2
 import numpy as np
 import ffmpeg
@@ -48,9 +47,6 @@ class DetectFaces:
                 self.detection_config.face_detection_folder_path, "detected_faces"
             )
             os.makedirs(self.detected_faces_dir, exist_ok=True)
-            self.clusters_json = os.path.join(
-                self.detection_config.face_detection_folder_path, "clusters.json"
-            )
 
             logger.info("DetectFaces initialized successfully.")
 
@@ -215,13 +211,7 @@ class DetectFaces:
                 cv2.imwrite(save_path, face_img)
                 detected_faces_paths.append(save_path)
 
-            # Step 5: Save clusters.json
-            cluster_dict = {
-                str(label): [f"face_{label}.jpg" for _ in faces]
-                for label, faces in clusters.items()
-            }
-            with open(self.clusters_json, "w") as f:
-                json.dump(cluster_dict, f, indent=4)
+            # Removed Step 5: No longer saving clusters.json
 
             logger.info("Video preprocessing completed successfully.")
 
