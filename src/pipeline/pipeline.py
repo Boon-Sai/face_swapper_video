@@ -15,7 +15,7 @@ class FaceSwapPipeline:
 
     def get_target_cluster_id(self, json_path: str, user_cluster_id: int = None) -> int:
         """
-        Determines the cluster_id to swap. If user provides an ID, uses it; otherwise, finds the most common cluster_id (ignoring noise).
+        Determines the cluster_id to swap. If user provides an ID, uses it; otherwise, finds the most common cluster_id.
         """
         try:
             logger.info("Determining target cluster ID for face swapping...")
@@ -31,9 +31,15 @@ class FaceSwapPipeline:
             if not cluster_ids:
                 raise Exception("No suitable face clusters found for swapping. Could not identify a main person.")
 
-            if user_cluster_id is not None and user_cluster_id in cluster_ids:
-                logger.info(f"Using user-specified cluster ID: {user_cluster_id}")
-                return user_cluster_id
+            if user_cluster_id is not None:
+                if user_cluster_id == -1:
+                    logger.info("User selected to swap ALL faces")
+                    return user_cluster_id
+                elif user_cluster_id in cluster_ids:
+                    logger.info(f"Using user-specified cluster ID: {user_cluster_id}")
+                    return user_cluster_id
+                else:
+                    logger.warning(f"User-specified cluster ID {user_cluster_id} not found. Using most prominent.")
 
             most_common_cluster = Counter(cluster_ids).most_common(1)[0][0]
             logger.info(f"Identified most prominent person with cluster ID: {most_common_cluster} (default selection)")
@@ -57,7 +63,7 @@ class FaceSwapPipeline:
             # Step 2: Determine which person to swap (allow user input)
             target_cluster_id = self.get_target_cluster_id(detection_artifact.json_information, user_cluster_id)
 
-            # Step 3: Swap the faces (pass original video_path for FPS retrieval)
+            # Step 3: Swap the faces
             face_swapper = SwapFaces(
                 source_image_path=self.image_path,
                 detection_artifact=detection_artifact,
