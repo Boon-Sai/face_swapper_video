@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import cv2
 import numpy as np
 import ffmpeg
@@ -149,44 +150,41 @@ class DetectFaces:
             logger.error("Error during face detection and clustering", exc_info=True)
             raise FaceDetectionException(str(e), sys) from e
 
-    def get_best_faces(self, clusters: dict) -> dict:
+    def get_aligned_faces(self, clusters: dict) -> dict:
         """
-        Select best representative face from each cluster
-        but do NOT save here. Just return the aligned faces.
+        Extract and align all faces from each cluster.
+        Return a dictionary of cluster labels to lists of aligned face images.
         """
         try:
-            logger.info("Selecting best representative faces from clusters...")
-            best_faces = {}
+            logger.info("Extracting and aligning all faces from clusters...")
+            aligned_faces = {}
 
             if not clusters:
-                logger.warning("No clusters found to extract best faces.")
-                return best_faces
+                logger.warning("No clusters found to extract faces.")
+                return aligned_faces
 
             for label, faces in clusters.items():
-                best_face = max(
-                    faces,
-                    key=lambda f: (f["bbox"][2] - f["bbox"][0])
-                    * (f["bbox"][3] - f["bbox"][1]),
-                )
-                frame_idx = best_face["frame_idx"]
+                aligned_faces[label] = []
+                for face in faces:
+                    frame_idx = face["frame_idx"]
 
-                cap = cv2.VideoCapture(self.video_path)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
-                cap.release()
+                    cap = cv2.VideoCapture(self.video_path)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, frame = cap.read()
+                    cap.release()
 
-                if not ret:
-                    logger.warning(f"Could not read frame {frame_idx} for cluster {label}")
-                    continue
+                    if not ret:
+                        logger.warning(f"Could not read frame {frame_idx} for cluster {label}")
+                        continue
 
-                aligned_face = face_align.norm_crop(frame, landmark=best_face["kps"])
-                best_faces[label] = aligned_face
+                    aligned_face = face_align.norm_crop(frame, landmark=face["kps"])
+                    aligned_faces[label].append(aligned_face)
 
-            logger.info("Best representative faces selected successfully.")
-            return best_faces
+            logger.info("All aligned faces extracted successfully.")
+            return aligned_faces
 
         except Exception as e:
-            logger.error("Error while selecting best faces", exc_info=True)
+            logger.error("Error while extracting aligned faces", exc_info=True)
             raise FaceDetectionException(str(e), sys) from e
 
     def video_preprocessing(self) -> FaceDetectionArtifact:
@@ -201,15 +199,16 @@ class DetectFaces:
             if clusters is None:
                 raise FaceDetectionException("No faces detected in video.", sys)
 
-            # Step 3: Select best faces
-            best_faces = self.get_best_faces(clusters)
+            # Step 3: Extract all aligned faces
+            aligned_faces = self.get_aligned_faces(clusters)
 
-            # Step 4: Save best faces
+            # Step 4: Save all aligned faces
             detected_faces_paths = []
-            for idx, face_img in best_faces.items():
-                save_path = os.path.join(self.detected_faces_dir, f"face_{idx}.jpg")
-                cv2.imwrite(save_path, face_img)
-                detected_faces_paths.append(save_path)
+            for label, face_list in aligned_faces.items():
+                for idx, face_img in enumerate(face_list):
+                    save_path = os.path.join(self.detected_faces_dir, f"face_{label}_{idx}.jpg")
+                    cv2.imwrite(save_path, face_img)
+                    detected_faces_paths.append(save_path)
 
             # Removed Step 5: No longer saving clusters.json
 
