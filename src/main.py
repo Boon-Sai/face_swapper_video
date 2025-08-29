@@ -1,25 +1,24 @@
-# src/main.py
-
 import sys
+from pathlib import Path
 
 from src.loggings.logger import logger
 from src.pipeline.pipeline import FaceSwapPipeline
 
 def main():
-    video_path = "/home/prem/Boonsai/face_swap_video/data/input_2.mp4"
+    """Main function to run the face swapping pipeline."""
+    video_path_str = input("Enter the path to your video file: ").strip().strip('"')
+    video_path = Path(video_path_str)
 
-    
-    pipeline = FaceSwapPipeline(video_path=video_path, source_face_path=source_face_path, index=index)
-    detection_artifact, clusters = pipeline.detecting_faces_pipeline()
-    swapping_artifact = pipeline.swapping_faces_pipeline(detection_artifact, clusters)
-    source_face_path = input("Enter the path to your source image: ").strip().strip('"')
+    if not video_path.exists() or not video_path.is_file():
+        logger.error(f"Video file not found or is not a file: {video_path_str}")
+        sys.exit(1)
 
     try:
-        index = int(input("Enter the index of the person to swap (0 to n-1, or -1 for all): "))
-    except ValueError:
-        logger.error("Invalid index input. Must be an integer.")
+        pipeline = FaceSwapPipeline(video_path=str(video_path))
+        pipeline.run_full_pipeline()
+    except Exception as e:
+        logger.error(f"An error occurred during the pipeline execution: {e}")
         sys.exit(1)
-    pipeline.run_full_pipeline()  # Invoke the full pipeline to perform detection and swapping
 
 if __name__ == "__main__":
     main()

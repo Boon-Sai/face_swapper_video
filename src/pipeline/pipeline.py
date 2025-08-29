@@ -10,115 +10,151 @@ from src.components.face_detection import DetectFaces
 from src.components.face_swapper import SwapFaces
 from src.entity.artifact_entity import FaceDetectionArtifact
 
-def main():
-    video_path = "/home/prem/Boonsai/face_swap_video/data/input_2.mp4"
+class FaceSwapPipeline:
+    def __init__(self, video_path: str):
+        self.video_path = video_path
+        self.detection_artifact = None
+        self.clusters = None
+        self.face_detector = None
 
-    # Initialize face detection and perform preprocessing
-    df = DetectFaces(video_path=video_path)
-    detection_artifact, clusters = df.video_preprocessing()
+    def detect_faces(self):
+        """Detects faces in the video and clusters them."""
+        logger.info("Starting face detection and clustering...")
+        self.face_detector = DetectFaces(video_path=self.video_path)
+        self.detection_artifact, self.clusters = self.face_detector.video_preprocessing()
 
-    # Handle case where no clusters are found
-    if not clusters:
-        logger.warning("No valid clusters found in the video. Exiting.")
-        sys.exit(0)
+        if not self.clusters:
+            logger.warning("No valid clusters found in the video.")
+            return False
+        
+        logger.info(f"Found {len(self.clusters)} unique persons.")
+        return True
 
-    # Select representative (best) face for each cluster for display
-    cluster_reps = []
-    for label, faces in sorted(clusters.items()):
-        best_face = max(
-            faces,
-            key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1])
-        )
-        cluster_reps.append((label, best_face))
+    def display_and_select_faces(self):
+        """Displays unique faces and prompts user for selection."""
+        if not self.clusters:
+            logger.warning("No clusters to display.")
+            return None, None
 
-    # Display unique faces if clusters exist
-    num_faces = len(cluster_reps)
-    if num_faces > 0:
-        cols = min(5, num_faces)
-        rows = (num_faces + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(15, 3 * rows))
+        cluster_reps = []
+        for label, faces in sorted(self.clusters.items()):
+            best_face = max(
+                faces,
+                key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1])
+            )
+            cluster_reps.append((label, best_face))
 
-        if num_faces == 1:
-            axes = np.array([[axes]])
-        elif rows == 1:
-            axes = axes.reshape(1, -1)
+        num_faces = len(cluster_reps)
+        if num_faces > 0:
+            cols = min(5, num_faces)
+            rows = (num_faces + cols - 1) // cols
+            fig, axes = plt.subplots(rows, cols, figsize=(15, 3 * rows))
 
-        for i in range(num_faces):
-            row = i // cols
-            col = i % cols
-            label, face = cluster_reps[i]
-            frame_idx = face['frame_idx']
-            cap = cv2.VideoCapture(video_path)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, frame = cap.read()
-            cap.release()
-            if ret:
-                aligned_face = face_align.norm_crop(frame, landmark=face['kps'])
-                axes[row, col].imshow(cv2.cvtColor(aligned_face, cv2.COLOR_BGR2RGB))
-            axes[row, col].set_title(f"Index {label}", fontsize=12)
-            axes[row, col].axis('off')
+            if num_faces == 1:
+                axes = np.array([[axes]])
+            elif rows == 1:
+                axes = axes.reshape(1, -1)
 
-        for i in range(num_faces, rows * cols):
-            row = i // cols
-            col = i % cols
-            axes[row, col].axis('off')
+            for i in range(num_faces):
+                row = i // cols
+                col = i % cols
+                label, face = cluster_reps[i]
+                frame_idx = face['frame_idx']
+                cap = cv2.VideoCapture(self.video_path)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    aligned_face = face_align.norm_crop(frame, landmark=face['kps'])
+                    axes[row, col].imshow(cv2.cvtColor(aligned_face, cv2.COLOR_BGR2RGB))
+                axes[row, col].set_title(f"Index {label}", fontsize=12)
+                axes[row, col].axis('off')
 
-        plt.tight_layout()
+            for i in range(num_faces, rows * cols):
+                row = i // cols
+                col = i % cols
+                axes[row, col].axis('off')
+
+            plt.tight_layout()
+            plt.show()
+
+            print("--- Unique Persons Found ---")
+            for label, face in cluster_reps:
+                bbox = face['bbox'].astype(int)
+                print(f"Index {label}: Representative face at [x1:{bbox[0]}, y1:{bbox[1]}, x2:{bbox[2]}, y2:{bbox[3]}]")
+            print("Index -1: Swap ALL persons")
+
+        source_face_path = input("Enter the path to your source image: ").strip().strip('"')
+
+        if not Path(source_face_path).exists():
+            logger.error(f"Source image '{source_face_path}' not found. Exiting.")
+            return None, None
+
+        source_img = cv2.imread(source_face_path)
+        
+        if self.face_detector is None:
+            logger.error("Face detector not initialized. Run detect_faces first.")
+            return None, None
+            
+        source_faces = self.face_detector.face_detection_model.get(source_img)
+        if len(source_faces) == 0:
+            print("No face found in the source image. Exiting.")
+            return None, None
+
+        plt.figure(figsize=(5, 5))
+        plt.imshow(cv2.cvtColor(source_img, cv2.COLOR_BGR2RGB))
+        plt.title("Source Face", fontsize=14)
+        plt.axis('off')
         plt.show()
 
-        print("--- Unique Persons Found ---")
-        for label, face in cluster_reps:
-            bbox = face['bbox'].astype(int)
-            print(f"Index {label}: Representative face at [x1:{bbox[0]}, y1:{bbox[1]}, x2:{bbox[2]}, y2:{bbox[3]}]")
-        print("Index -1: Swap ALL persons")
+        try:
+            index = int(input(f"Enter the index of the person to swap (0 to {len(self.clusters)-1}, or -1 for all): "))
+            if index < -1 or (index >= len(self.clusters) and index != -1):
+                print("Invalid index. Exiting.")
+                return None, None
+        except ValueError:
+            logger.error("Invalid index input. Must be an integer.")
+            return None, None
+            
+        return source_face_path, index
 
-    # Obtain source image path from user
-    source_face_path = input("Enter the path to your source image: ").strip().strip('"')
+    def swap_faces(self, source_face_path: str, index: int):
+        """Swaps faces in the video based on user selection."""
+        if self.detection_artifact is None or self.clusters is None:
+            logger.error("Face detection must be run before swapping.")
+            return
 
-    # Validate source image existence
-    if not Path(source_face_path).exists():
-        logger.error(f"Source image '{source_face_path}' not found. Exiting.")
-        sys.exit(1)
+        logger.info(f"Preparing to swap faces for index {index}...")
 
-    # Load and validate source face using existing detection model
-    source_img = cv2.imread(source_face_path)
-    source_faces = df.face_detection_model.get(source_img)
-    if len(source_faces) == 0:
-        print("No face found in the source image. Exiting.")
-        sys.exit(1)
+        if index == -1:
+            swap_clusters = [face for cluster_faces in self.clusters.values() for face in cluster_faces]
+        else:
+            swap_clusters = self.clusters.get(index, [])
 
-    # Display source face
-    plt.figure(figsize=(5, 5))
-    plt.imshow(cv2.cvtColor(source_img, cv2.COLOR_BGR2RGB))
-    plt.title("Source Face", fontsize=14)
-    plt.axis('off')
-    plt.show()
-
-    # Obtain chosen index from user
-    try:
-        index = int(input(f"Enter the index of the person to swap (0 to {len(clusters)-1}, or -1 for all): "))
-        if index < -1 or (index >= len(clusters) and index != -1):
-            print("Invalid index. Exiting.")
-            sys.exit(1)
-    except ValueError:
-        logger.error("Invalid index input. Must be an integer.")
-        sys.exit(1)
-
-    # Prepare clusters for swapping based on index
-    if index == -1:
-        swap_clusters = []
-    else:
-        swap_clusters = clusters.get(index, [])
         if not swap_clusters:
-            logger.warning(f"No faces found for index {index}. Exiting.")
-            sys.exit(0)
+            logger.warning(f"No faces found for index {index}. Nothing to swap.")
+            return
 
-    # Set extracted audio path for use in swapping
-    FaceDetectionArtifact.extracted_audio_path = detection_artifact.extracted_audio_path
+        FaceDetectionArtifact.extracted_audio_path = self.detection_artifact.extracted_audio_path
 
-    # Initialize and perform face swapping
-    sf = SwapFaces(index=index, video_path=video_path, source_face_path=source_face_path, clusters=swap_clusters)
-    swapping_artifact = sf.video_preprocessing()
+        sf = SwapFaces(index=index, video_path=self.video_path, source_face_path=source_face_path, clusters=swap_clusters)
+        swapping_artifact = sf.video_preprocessing()
+        
+        if swapping_artifact and hasattr(swapping_artifact, 'output_video_path'):
+            logger.info(f"Face swapping complete. Output video at: {swapping_artifact.output_video_path}")
+        else:
+            logger.error("Face swapping failed.")
+
+    def run_full_pipeline(self):
+        """Runs the complete face detection and swapping pipeline."""
+        if self.detect_faces():
+            source_face_path, index = self.display_and_select_faces()
+            if source_face_path is not None and index is not None:
+                self.swap_faces(source_face_path, index)
 
 if __name__ == "__main__":
-    main()
+    # This main function is for testing the pipeline class directly if needed.
+    # The main application entry point will be in src/main.py
+    video_path = "path/to/your/video.mp4" # Example path
+    pipeline = FaceSwapPipeline(video_path=video_path)
+    pipeline.run_full_pipeline()
