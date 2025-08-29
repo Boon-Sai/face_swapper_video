@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import cv2
 import numpy as np
 import ffmpeg
@@ -152,11 +151,11 @@ class DetectFaces:
 
     def get_aligned_faces(self, clusters: dict) -> dict:
         """
-        Extract and align all faces from each cluster.
-        Return a dictionary of cluster labels to lists of aligned face images.
+        Extract and align the best face from each cluster.
+        Return a dictionary of cluster labels to lists containing a single aligned face image.
         """
         try:
-            logger.info("Extracting and aligning all faces from clusters...")
+            logger.info("Extracting and aligning best faces from clusters...")
             aligned_faces = {}
 
             if not clusters:
@@ -164,23 +163,27 @@ class DetectFaces:
                 return aligned_faces
 
             for label, faces in clusters.items():
-                aligned_faces[label] = []
-                for face in faces:
-                    frame_idx = face["frame_idx"]
+                if not faces:
+                    continue
+                best_face = max(
+                    faces,
+                    key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1])
+                )
+                frame_idx = best_face["frame_idx"]
 
-                    cap = cv2.VideoCapture(self.video_path)
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                    ret, frame = cap.read()
-                    cap.release()
+                cap = cv2.VideoCapture(self.video_path)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                cap.release()
 
-                    if not ret:
-                        logger.warning(f"Could not read frame {frame_idx} for cluster {label}")
-                        continue
+                if not ret:
+                    logger.warning(f"Could not read frame {frame_idx} for cluster {label}")
+                    continue
 
-                    aligned_face = face_align.norm_crop(frame, landmark=face["kps"])
-                    aligned_faces[label].append(aligned_face)
+                aligned_face = face_align.norm_crop(frame, landmark=best_face["kps"])
+                aligned_faces[label] = [aligned_face]
 
-            logger.info("All aligned faces extracted successfully.")
+            logger.info("Best aligned faces extracted successfully.")
             return aligned_faces
 
         except Exception as e:
@@ -205,19 +208,16 @@ class DetectFaces:
             # Step 4: Save all aligned faces
             detected_faces_paths = []
             for label, face_list in aligned_faces.items():
-                for idx, face_img in enumerate(face_list):
-                    save_path = os.path.join(self.detected_faces_dir, f"face_{label}_{idx}.jpg")
-                    cv2.imwrite(save_path, face_img)
-                    detected_faces_paths.append(save_path)
-
-            # Removed Step 5: No longer saving clusters.json
+                save_path = os.path.join(self.detected_faces_dir, f"face_{label}.jpg")
+                cv2.imwrite(save_path, face_list[0])
+                detected_faces_paths.append(save_path)
 
             logger.info("Video preprocessing completed successfully.")
 
             return FaceDetectionArtifact(
                 detected_faces_path=self.detected_faces_dir,
                 extracted_audio_path=audio_path,
-            )
+            ), clusters
 
         except Exception as e:
             logger.error("Error during full preprocessing pipeline", exc_info=True)

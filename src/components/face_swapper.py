@@ -7,6 +7,7 @@ from pathlib import Path
 from IPython.display import clear_output
 from insightface.app import FaceAnalysis
 from insightface.model_zoo import get_model
+from tqdm import tqdm
 
 from src.exceptions.exception import FaceDetectionException
 from src.loggings.logger import logger
@@ -32,16 +33,16 @@ class SwapFaces:
             clusters (list): List of clustered embeddings
         """
         try:
-            logger.log("Initializing Face Swap Operation...")
+            logger.info("Initializing Face Swap Operation...")
 
             # Face Swapper model
-            self.swap_face_config = FaceSwappingConfig(config=ConfigEntity)
+            self.swap_face_config = FaceSwappingConfig(config=ConfigEntity())
             self.face_swap_model = get_model(
                 self.swap_face_config.face_swapper_model,
                 download=False,
                 download_zip=False
             )
-            logger.log("Face swap model initialized successfully")
+            logger.info("Face swap model initialized successfully")
 
             # Face Detection model
             self.detection_config = FaceDetectionConfig(config=ConfigEntity())
@@ -52,7 +53,7 @@ class SwapFaces:
                 ctx_id=self.detection_config.ctx_id,
                 det_size=self.detection_config.det_size
             )
-            logger.log("Face detection model initialized successfully")
+            logger.info("Face detection model initialized successfully")
 
             # Instance attributes
             self.video_path = video_path
@@ -64,7 +65,10 @@ class SwapFaces:
             source_img = cv2.imread(self.source_face_path)
             if source_img is None:
                 raise FaceDetectionException("Source face image not found!", sys)
-            self.source_face = self.face_detection_model.get(source_img)[0]
+            source_faces = self.face_detection_model.get(source_img)
+            if not source_faces:
+                raise FaceDetectionException("No face detected in source image", sys)
+            self.source_face = source_faces[0]
 
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
@@ -87,54 +91,42 @@ class SwapFaces:
             out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
 
             processed_frames = 0
-            frame_count = 0
-            sampling_interval = 10
 
             # Precompute target embeddings if specific cluster chosen
             target_embeddings = None
             if self.index != -1:
                 target_embeddings = [f['embedding'] for f in self.clusters]
 
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            with tqdm(total=total_frames, desc="Processing frames", unit="frame") as pbar:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-                if frame_count % sampling_interval != 0:
-                    frame_count += 1
-                    continue
+                    detected_faces = self.face_detection_model.get(frame)
 
-                detected_faces = self.face_detection_model.get(frame)
-
-                if detected_faces:
-                    for face in detected_faces:
-                        if self.index == -1:
-                            # Swap all detected faces
-                            frame = self.face_swap_model.get(frame, face, self.source_face, paste_back=True)
-                        else:
-                            # Swap only chosen cluster faces
-                            new_embedding = face['embedding']
-                            sims = [
-                                np.dot(new_embedding, t) /
-                                (np.linalg.norm(new_embedding) * np.linalg.norm(t))
-                                for t in target_embeddings
-                            ]
-                            if max(sims) > 0.65:
+                    if detected_faces:
+                        for face in detected_faces:
+                            if self.index == -1:
+                                # Swap all detected faces
                                 frame = self.face_swap_model.get(frame, face, self.source_face, paste_back=True)
+                            else:
+                                # Swap only chosen cluster faces
+                                new_embedding = face['embedding']
+                                sims = [
+                                    np.dot(new_embedding, t) /
+                                    (np.linalg.norm(new_embedding) * np.linalg.norm(t))
+                                    for t in target_embeddings
+                                ]
+                                if max(sims) > 0.65:
+                                    frame = self.face_swap_model.get(frame, face, self.source_face, paste_back=True)
 
-                out.write(frame)
-                processed_frames += 1
-
-                if processed_frames % 10 == 0:
-                    clear_output(wait=True)
-                    progress_percent = (processed_frames / total_frames) * 100
-                    logger.log(f"Processed {processed_frames}/{total_frames} frames ({progress_percent:.1f}%)")
-
-                frame_count += 1
+                    out.write(frame)
+                    processed_frames += 1
+                    pbar.update(1)
 
             cap.release()
             out.release()
-            clear_output(wait=True)
 
             logger.info("Processing Complete!")
             logger.info(f"Input video: {Path(self.video_path).name}")
@@ -176,8 +168,13 @@ class SwapFaces:
         Example: stabilization, resizing, cropping etc.
         """
         try:
-            logger.log("Video preprocessing step invoked... (placeholder)")
-            # output_video_path = self.swap_faces()
-            return True
+            logger.info("Video preprocessing step invoked... (placeholder)")
+            output_video_path = self.swap_faces()
+            output_video_path = self.insert_audio(output_video_path)
+            logger.info(f"Final output video with audio at: {output_video_path}")
+
+            return FaceSwappingArtifact(
+                final_output_video_path = output_video_path
+            )
         except Exception as e:
             raise FaceDetectionException(str(e), sys) from e
