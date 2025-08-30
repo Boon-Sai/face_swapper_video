@@ -9,3 +9,6 @@ pillow
 ipykernel
 ffmpeg-python
 scikit-learn
+fastapi
+uvicorn
+python-multipart
