@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 from src.loggings.logger import logger
-from src.pipeline.pipeline import FaceSwapPipeline
+from src.pipeline.face_swap_video_pipeline import FaceSwapPipeline
 
 def main():
     """Main function to run the face swapping pipeline."""
