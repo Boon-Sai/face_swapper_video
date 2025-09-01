@@ -3,3 +3,4 @@ inswapper_128.onnx
 __pycache__/
 artifacts
 logs
+uploads

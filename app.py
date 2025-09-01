@@ -78,7 +78,7 @@ async def upload_video(video: UploadFile = File(...), source_image: UploadFile =
         for label, faces in sorted(pipeline.clusters.items()):
             best_face = max(faces, key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1]))
             bbox = [int(val) for val in best_face['bbox']]
-            # Convert representative face image to base64 (if available)
+            # Convert representative image to base64 (if available)
             base64_face = ""
             face_image_path = best_face.get('image_path')
             if face_image_path and os.path.exists(face_image_path):
@@ -107,7 +107,7 @@ async def upload_video(video: UploadFile = File(...), source_image: UploadFile =
         return JSONResponse(
             status_code=200,
             content={
-                "message": f"Detected {len(detected_faces)} faces. Select faces to swap by index (e.g., '1' or '-1' for all) in the /swap-faces/ endpoint.",
+                "message": f"Detected {len(detected_faces)} faces. Select a face to swap by index (e.g., 1 or -1 for all) in the /swap-faces/ endpoint.",
                 "detected_faces": detected_faces,
                 "video_path": str(video_path),
                 "source_image_path": str(source_image_path)
@@ -122,12 +122,12 @@ async def upload_video(video: UploadFile = File(...), source_image: UploadFile =
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
 
 @app.post("/swap-faces/")
-async def swap_faces(indices: int = Form(...)):
+async def swap_faces(indices: int = Form(...)):  # Changed from str to int
     """
-    Swaps faces in the previously uploaded video based on selected indices.
+    Swaps faces in the previously uploaded video based on selected index.
     
     Args:
-        indices (str): Single index of face to swap (e.g., "1") or "-1" for all faces.
+        indices (int): Single index of face to swap (e.g., 1) or -1 for all faces.
     
     Returns:
         FileResponse: The swapped video file.
@@ -159,21 +159,17 @@ async def swap_faces(indices: int = Form(...)):
             logger.error(f"Source image not found: {source_image_path}")
             raise HTTPException(status_code=404, detail=f"Source image not found: {source_image_path}")
 
-        # Parse indices
+        # Validate indices
         logger.info(f"Received indices: {indices}")
-        if indices == "-1":
-            face_index = -1  # Use -1 for all faces
-        else:
-            try:
-                # Expect a single index (e.g., "1")
-                if "," in indices:
-                    raise ValueError("Multiple indices not supported. Provide a single index (e.g., '1') or '-1' for all faces.")
-                face_index = int(indices) - 1  # Convert to 0-based
-                if face_index < 0 or face_index >= len(detected_faces):
-                    raise ValueError(f"Index out of range. Valid range: 1 to {len(detected_faces)}")
-            except ValueError as e:
-                logger.warning(f"Invalid indices input: {indices}. Error: {e}")
-                raise HTTPException(status_code=400, detail=f"Invalid indices: {e}")
+        face_index = indices
+        if face_index != -1:  # Check for valid single index
+            face_index = face_index - 1  # Convert to 0-based
+            if face_index < 0 or face_index >= len(detected_faces):
+                logger.warning(f"Invalid index: {indices}. Valid range: 1 to {len(detected_faces)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid index: {indices}. Valid range: 1 to {len(detected_faces)}"
+                )
 
         logger.info(f"Parsed face_index: {face_index}")
 

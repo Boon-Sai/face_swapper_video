@@ -86,7 +86,10 @@ class SwapFaces:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            output_video_path = f"swapped_{Path(self.video_path).stem}.mp4"
+            output_video_path = os.path.join(
+                self.swap_face_config.face_swapped_video_with_audio,
+                f"swapped_{Path(self.video_path).stem}.mp4"
+            )
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
 
@@ -149,7 +152,10 @@ class SwapFaces:
             input_video = ffmpeg.input(output_video_path)
             input_audio = ffmpeg.input(FaceDetectionArtifact.extracted_audio_path)
 
-            output_filename = os.path.splitext(output_video_path)[0] + "_with_audio.mp4"
+            output_filename = os.path.join(
+                self.swap_face_config.face_swapped_video_with_audio,
+                os.path.splitext(os.path.basename(output_video_path))[0] + "_with_audio.mp4"
+            )
             (
                 ffmpeg
                 .output(input_video.video, input_audio.audio, output_filename, vcodec='copy', acodec='aac')
