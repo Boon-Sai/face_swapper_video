@@ -9,7 +9,7 @@ from pathlib import Path
 # Assuming your pipeline is in src/pipeline/face_swap_video_pipeline.py
 from src.pipeline.face_swap_video_pipeline import FaceSwapPipeline  
 from src.loggings.logger import logger
-from src.exceptions.exception import FaceDetectionException
+from src.exceptions.exception import VideoProcessingException
 
 app = FastAPI(
     title="Face Swapper API",
@@ -23,9 +23,7 @@ OUTPUT_DIR = Path("outputs")
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Store the most recent pipeline instance and video path
-current_pipeline = None
-current_video_path = None
+
 
 @app.post("/detect_faces/")
 async def detect_faces_in_video(video: UploadFile = File(...)):
@@ -44,7 +42,6 @@ async def detect_faces_in_video(video: UploadFile = File(...)):
         - A JSON object with a status and a list of `detected_faces`. Each detected face includes its
           `index`, and an identifier for the representative face.
     """
-    global current_pipeline, current_video_path
     try:
         video_path = UPLOAD_DIR / video.filename
         
@@ -61,10 +58,6 @@ async def detect_faces_in_video(video: UploadFile = File(...)):
                 status_code=404,
                 content={"message": "No valid faces were detected in the video."}
             )
-
-        # Store the pipeline and video path globally
-        current_pipeline = pipeline
-        current_video_path = str(video_path)
 
         # Prepare the response data
         response_faces = []
@@ -91,10 +84,12 @@ async def detect_faces_in_video(video: UploadFile = File(...)):
             content={
                 "status": "success",
                 "message": "Faces detected. Use the index to swap.",
+                "video_path": str(video_path),
+                "clusters": pipeline.clusters,
                 "detected_faces": response_faces
             }
         )
-    except FaceDetectionException as e:
+    except VideoProcessingException as e:
         logger.error(f"Error during face detection: {e.args[0]}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -111,6 +106,8 @@ async def detect_faces_in_video(video: UploadFile = File(...)):
 async def swap_faces_in_video(
     source_image: UploadFile = File(...),
     face_index: int = Form(...),
+    video_path: str = Form(...),
+    clusters: str = Form(...),
 ):
     """
     **Swaps faces in the previously uploaded video.**
@@ -122,28 +119,27 @@ async def swap_faces_in_video(
         - `source_image` (UploadFile): The image containing the face to swap in.
         - `face_index` (int): The index of the person to swap. Use the indices
           from a previous detection run, or -1 for all.
+        - `video_path` (str): The path to the video file.
+        - `clusters` (str): A JSON string of the clusters data.
 
     - **Returns**:
         - The swapped video file.
     """
     try:
-        # Check if a video has been uploaded and processed
-        if current_pipeline is None or current_video_path is None:
-            raise HTTPException(
-                status_code=404,
-                detail="No video found. Please upload a video using the /detect_faces/ endpoint first."
-            )
-
         # Save the uploaded source image to a temporary path
         source_image_path = UPLOAD_DIR / source_image.filename
         with source_image_path.open("wb") as buffer:
             shutil.copyfileobj(source_image.file, buffer)
         
-        # Use the stored pipeline instance
-        pipeline = current_pipeline
+        # Deserialize the clusters data
+        import json
+        clusters_dict = json.loads(clusters)
+
+        # Initialize the pipeline
+        pipeline = FaceSwapPipeline(video_path=video_path)
         
         # Call the swapping method from the pipeline
-        swapping_artifact = pipeline.swap_faces(str(source_image_path), face_index)
+        swapping_artifact = pipeline.swap_faces(str(source_image_path), face_index, clusters_dict, pipeline.detection_artifact)
         
         if not swapping_artifact or not hasattr(swapping_artifact, 'final_output_video_path'):
             raise HTTPException(
@@ -160,7 +156,7 @@ async def swap_faces_in_video(
             media_type="video/mp4"
         )
 
-    except FaceDetectionException as e:
+    except VideoProcessingException as e:
         logger.error(f"Error during face swapping: {e.args[0]}", exc_info=True)
         raise HTTPException(
             status_code=500,

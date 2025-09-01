@@ -9,7 +9,7 @@ from insightface.app import FaceAnalysis
 from insightface.model_zoo import get_model
 from tqdm import tqdm
 
-from src.exceptions.exception import FaceDetectionException
+from src.exceptions.exception import VideoProcessingException
 from src.loggings.logger import logger
 from src.entity.config_entity import (
     FaceSwappingConfig,
@@ -64,14 +64,14 @@ class SwapFaces:
             # Load source face
             source_img = cv2.imread(self.source_face_path)
             if source_img is None:
-                raise FaceDetectionException("Source face image not found!", sys)
+                raise VideoProcessingException("Source face image not found!", sys)
             source_faces = self.face_detection_model.get(source_img)
             if not source_faces:
-                raise FaceDetectionException("No face detected in source image", sys)
+                raise VideoProcessingException("No face detected in source image", sys)
             self.source_face = source_faces[0]
 
         except Exception as e:
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def swap_faces(self) -> str:
         """
@@ -137,7 +137,7 @@ class SwapFaces:
             return output_video_path
 
         except Exception as e:
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def insert_audio(self, output_video_path: str) -> str:
         """
@@ -160,7 +160,7 @@ class SwapFaces:
             return output_filename
 
         except Exception as e:
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def video_preprocessing(self):
         """
@@ -177,4 +177,4 @@ class SwapFaces:
                 final_output_video_path = output_video_path
             )
         except Exception as e:
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e

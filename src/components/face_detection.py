@@ -9,7 +9,7 @@ from sklearn.cluster import DBSCAN
 from insightface.utils import face_align
 from IPython.display import clear_output
 
-from src.exceptions.exception import FaceDetectionException
+from src.exceptions.exception import VideoProcessingException
 from src.loggings.logger import logger
 
 from src.entity.config_entity import (
@@ -52,7 +52,7 @@ class DetectFaces:
 
         except Exception as e:
             logger.error("Error initializing DetectFaces", exc_info=True)
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def extract_audio(self) -> str | None:
         try:
@@ -86,7 +86,7 @@ class DetectFaces:
 
         except Exception as e:
             logger.error("Unexpected error during audio extraction", exc_info=True)
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def detecting_and_clustering_faces(self) -> dict | None:
         try:
@@ -147,7 +147,7 @@ class DetectFaces:
 
         except Exception as e:
             logger.error("Error during face detection and clustering", exc_info=True)
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def get_aligned_faces(self, clusters: dict) -> dict:
         """
@@ -188,7 +188,7 @@ class DetectFaces:
 
         except Exception as e:
             logger.error("Error while extracting aligned faces", exc_info=True)
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
 
     def video_preprocessing(self) -> FaceDetectionArtifact:
         try:
@@ -221,4 +221,4 @@ class DetectFaces:
 
         except Exception as e:
             logger.error("Error during full preprocessing pipeline", exc_info=True)
-            raise FaceDetectionException(str(e), sys) from e
+            raise VideoProcessingException(str(e), sys) from e
