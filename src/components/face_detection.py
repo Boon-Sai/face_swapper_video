@@ -82,7 +82,7 @@ class DetectFaces:
         except ffmpeg.Error as e:
             error_msg = e.stderr.decode() if e.stderr else "No stderr output"
             logger.error(f"FFmpeg error during audio extraction: {error_msg}")
-            raise FaceDetectionException(f"Error extracting audio: {error_msg}", sys) from e
+            raise VideoProcessingException(f"Error extracting audio: {error_msg}", sys) from e
 
         except Exception as e:
             logger.error("Unexpected error during audio extraction", exc_info=True)
@@ -200,7 +200,7 @@ class DetectFaces:
             # Step 2: Detect & cluster faces
             clusters = self.detecting_and_clustering_faces()
             if clusters is None:
-                raise FaceDetectionException("No faces detected in video.", sys)
+                raise VideoProcessingException("No faces detected in video.", sys)
 
             # Step 3: Extract all aligned faces
             aligned_faces = self.get_aligned_faces(clusters)
