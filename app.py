@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from src.pipeline.face_swap_video_pipeline import FaceSwapPipeline
 from src.loggings.logger import logger
@@ -7,6 +7,9 @@ import os
 import base64
 import json
 from pathlib import Path
+import shutil
+
+from src.constants import ARTIFACT_DIR_PATH
 
 app = FastAPI(
     title="Video Face Swapper API",
@@ -121,8 +124,32 @@ async def upload_video(video: UploadFile = File(...), source_image: UploadFile =
         logger.error(f"Unexpected error in video upload: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
 
+def cleanup(video_path: str, source_image_path: str):
+    """
+    Removes all uploaded files, artifacts, and resets session data to conserve disk space.
+    """
+    try:
+        global latest_session_data
+        # Reset session data
+        latest_session_data = {}
+
+        # Remove uploaded files
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        if os.path.exists(source_image_path):
+            os.remove(source_image_path)
+
+        # Remove entire artifacts directory (includes all processed files and directories)
+        if os.path.exists(ARTIFACT_DIR_PATH):
+            shutil.rmtree(ARTIFACT_DIR_PATH)
+            logger.info(f"Cleaned up artifacts directory: {ARTIFACT_DIR_PATH}")
+
+        logger.info("Cleanup completed successfully.")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
+
 @app.post("/swap-faces/")
-async def swap_faces(indices: int = Form(...)):  # Changed from str to int
+async def swap_faces(indices: int = Form(...), background_tasks: BackgroundTasks = None):
     """
     Swaps faces in the previously uploaded video based on selected index.
     
@@ -191,6 +218,9 @@ async def swap_faces(indices: int = Form(...)):  # Changed from str to int
         output_video_path = swapping_artifact.final_output_video_path
         logger.info(f"Face swapping complete. Output video at: {output_video_path}")
 
+        # Schedule cleanup to run after the response is sent
+        background_tasks.add_task(cleanup, video_path, source_image_path)
+
         return FileResponse(
             path=output_video_path,
             filename=Path(output_video_path).name,
@@ -206,4 +236,4 @@ async def swap_faces(indices: int = Form(...)):  # Changed from str to int
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8002, reload=True)
