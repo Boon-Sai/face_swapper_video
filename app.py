@@ -144,6 +144,11 @@ def cleanup(video_path: str, source_image_path: str):
             shutil.rmtree(ARTIFACT_DIR_PATH)
             logger.info(f"Cleaned up artifacts directory: {ARTIFACT_DIR_PATH}")
 
+        # Remove entire uploads directory
+        if os.path.exists(str(UPLOAD_DIR)):
+            shutil.rmtree(str(UPLOAD_DIR))
+            logger.info(f"Cleaned up uploads directory: {UPLOAD_DIR}")
+
         logger.info("Cleanup completed successfully.")
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
