@@ -1,278 +1,156 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi.responses import JSONResponse
 from src.pipeline.face_swap_video_pipeline import FaceSwapPipeline
+from src.components.face_swapper import SwapFaces
 from src.loggings.logger import logger
-from src.exceptions.exception import VideoProcessingException
 import os
 import base64
-import json
-from pathlib import Path
-import shutil
-import cv2
-import numpy as np
+import sys
 
-from src.constants import ARTIFACT_DIR_PATH
-
-app = FastAPI(
-    title="Video Face Swapper API",
-    description="An API to detect faces in a video and swap them with a source face.",
-    version="1.0.0"
-)
-
-# Directories for uploads and outputs
-UPLOAD_DIR = Path("uploads")
-OUTPUT_DIR = Path("outputs")
-UPLOAD_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
+app = FastAPI()
 
 # Global variable to store the latest session data
 latest_session_data = {}
 
-def validate_face_in_image(image_path: str) -> bool:
-    """
-    Validates that the image at the given path contains at least one face.
-    
-    Args:
-        image_path (str): Path to the image file.
-    
-    Returns:
-        bool: True if at least one face is detected, False otherwise.
-    """
-    try:
-        # Load the image
-        image = cv2.imread(image_path)
-        if image is None:
-            logger.error(f"Failed to load image: {image_path}")
-            return False
-        
-        # Convert to grayscale for face detection
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Load a pre-trained face detector (Haar Cascade)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        
-        return len(faces) > 0
-    except Exception as e:
-        logger.error(f"Error validating face in image {image_path}: {e}")
-        return False
-
-@app.post("/upload-video/")
-async def upload_video(video: UploadFile = File(...), source_image: UploadFile = File(...)):
-    """
-    Uploads a video and source image, detects faces in the video, and prepares for face swapping.
-    
-    Args:
-        video (UploadFile): The video file to process.
-        source_image (UploadFile): The image containing the face to swap in.
-    
-    Returns:
-        JSONResponse: Contains detected face information, video path, source image path, and a message.
-    """
+@app.post("/upload-files/")
+async def upload_files(video: UploadFile = File(...), source_face_image: UploadFile = File(...)):
     try:
         global latest_session_data
-
-        # Validate file extensions
-        if not video.filename.lower().endswith(('.mp4', '.avi', '.mov')):
-            raise HTTPException(status_code=400, detail="Invalid video format. Supported: .mp4, .avi, .mov")
-        if not source_image.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-            raise HTTPException(status_code=400, detail="Invalid image format. Supported: .jpg, .jpeg, .png")
-
-        # Save video and source image
-        video_path = UPLOAD_DIR / video.filename
-        source_image_path = UPLOAD_DIR / source_image.filename
-
-        with video_path.open("wb") as buffer:
-            buffer.write(await video.read())
-        with source_image_path.open("wb") as buffer:
-            buffer.write(await source_image.read())
-
-        # Initialize pipeline and detect faces
-        logger.info(f"Initializing FaceSwapPipeline with video: {video_path}")
-        pipeline = FaceSwapPipeline(video_path=str(video_path))
+        
+        data_dir = "data"
+        os.makedirs(data_dir, exist_ok=True)
+        
+        video_path = os.path.join(data_dir, video.filename)
+        with open(video_path, "wb") as f:
+            f.write(await video.read())
+        
+        # Source face image is mandatory
+        source_path = os.path.join(data_dir, source_face_image.filename)
+        with open(source_path, "wb") as f:
+            f.write(await source_face_image.read())
+        
+        pipeline = FaceSwapPipeline(video_path=video_path)
         if not pipeline.detect_faces():
             latest_session_data = {
-                "video_path": str(video_path),
-                "source_image_path": str(source_image_path),
+                "pipeline": pipeline,
+                "video_path": video_path,
+                "source_path": source_path,
+                "detected_faces": []
+            }
+            logger.info(f"No faces detected. Session data: {latest_session_data.keys()}")
+            return {
+                "message": "No faces detected in the video. Please try a different video.",
                 "detected_faces": [],
-                "clusters": {}
+                "video_path": video_path,
+                "source_path": source_path
             }
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "message": "No faces detected in the video. Please try a different video.",
-                    "detected_faces": [],
-                    "video_path": str(video_path),
-                    "source_image_path": str(source_image_path)
-                }
-            )
-
-        # Prepare detected faces response
+        
+        # Extract detected faces for response
+        detected_dir = pipeline.detection_artifact.detected_faces_path
+        sorted_labels = sorted(pipeline.clusters.keys())
         detected_faces = []
-        for label, faces in sorted(pipeline.clusters.items()):
-            best_face = max(faces, key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1]))
-            bbox = [int(val) for val in best_face['bbox']]
-            # Convert representative image to base64 (if available and contains a face)
-            base64_face = ""
-            face_image_path = best_face.get('image_path')
-            if face_image_path and os.path.exists(face_image_path):
-                try:
-                    if validate_face_in_image(face_image_path):
-                        with open(face_image_path, "rb") as img_file:
-                            base64_face = base64.b64encode(img_file.read()).decode("utf-8")
-                    else:
-                        logger.warning(f"No face detected in image: {face_image_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to encode face image {face_image_path}: {e}")
-
-            detected_faces.append({
-                "index": int(label) + 1,  # 1-based indexing for user
-                "base64": f"data:image/jpeg;base64,{base64_face}" if base64_face else None,
-                "bbox": {"x1": bbox[0], "y1": bbox[1], "x2": bbox[2], "y2": bbox[3]}
-            })
-
-        # Store session data
+        for idx, label in enumerate(sorted_labels):
+            path = os.path.join(detected_dir, f"face_{label}.jpg")
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    img_bytes = f.read()
+                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+                detected_faces.append({
+                    "index": idx + 1,
+                    "base64": f"data:image/jpeg;base64,{img_base64}",
+                    "path": path
+                })
+        
         latest_session_data = {
-            "video_path": str(video_path),
-            "source_image_path": str(source_image_path),
+            "pipeline": pipeline,
+            "video_path": video_path,
+            "source_path": source_path,
             "detected_faces": detected_faces,
-            "clusters": pipeline.clusters,
-            "detection_artifact": pipeline.detection_artifact
+            "sorted_labels": sorted_labels
         }
-
-        logger.info(f"Detected {len(detected_faces)} faces in video '{video.filename}'.")
-        return JSONResponse(
-            status_code=200,
-            content={
-                "message": f"Detected {len(detected_faces)} faces. Select a face to swap by index (e.g., 1 or -1 for all) in the /swap-faces/ endpoint.",
-                "detected_faces": detected_faces,
-                "video_path": str(video_path),
-                "source_image_path": str(source_image_path)
-            }
-        )
-
-    except VideoProcessingException as e:
-        logger.error(f"Error in video upload endpoint: {e.args[0]}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Video Processing Error: {e.args[0]}")
+        
+        logger.info(f"Session data updated: {latest_session_data.keys()}")
+        logger.debug(f"Clusters in session data: {pipeline.clusters}")
+        return {
+            "message": f"Detected {len(detected_faces)} faces. Please select a face to swap by index (1 to {len(detected_faces)} or -1 for all) in the /swap-faces/ endpoint.",
+            "detected_faces": detected_faces,
+            "video_path": video_path,
+            "source_path": source_path
+        }
     except Exception as e:
-        logger.error(f"Unexpected error in video upload: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
-
-def cleanup(video_path: str, source_image_path: str):
-    """
-    Removes all uploaded files, artifacts, and resets session data to conserve disk space.
-    """
-    try:
-        global latest_session_data
-        # Reset session data
-        latest_session_data = {}
-
-        # Remove uploaded files
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        if os.path.exists(source_image_path):
-            os.remove(source_image_path)
-
-        # Remove entire artifacts directory (includes all processed files and directories)
-        if os.path.exists(ARTIFACT_DIR_PATH):
-            shutil.rmtree(ARTIFACT_DIR_PATH)
-            logger.info(f"Cleaned up artifacts directory: {ARTIFACT_DIR_PATH}")
-
-        # Remove entire uploads directory
-        if os.path.exists(str(UPLOAD_DIR)):
-            shutil.rmtree(str(UPLOAD_DIR))
-            logger.info(f"Cleaned up uploads directory: {UPLOAD_DIR}")
-
-        logger.info("Cleanup completed successfully.")
-    except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
+        logger.error(f"Error in file upload endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 @app.post("/swap-faces/")
-async def swap_faces(indices: int = Form(...), background_tasks: BackgroundTasks = None):
-    """
-    Swaps faces in the previously uploaded video based on selected index.
-    
-    Args:
-        indices (int): Single index of face to swap (e.g., 1) or -1 for all faces.
-    
-    Returns:
-        FileResponse: The swapped video file.
-    """
+async def swap_faces(indices: int = Query(..., description="Index of the face to swap (e.g., 1) or -1 for all faces")):
     try:
-        global latest_session_data
+        logger.info(f"Received swap-faces request with indices={indices}")
+        logger.debug(f"Current session data: {latest_session_data}")
+        
         if not latest_session_data:
-            logger.error("No session data available. Please upload video and source image first.")
-            raise HTTPException(status_code=404, detail="No session data available. Please upload video and source image first.")
-
-        # Validate session data
-        required_keys = ["video_path", "source_image_path", "detected_faces", "clusters", "detection_artifact"]
-        missing_keys = [key for key in required_keys if key not in latest_session_data]
-        if missing_keys:
-            logger.error(f"Missing session data keys: {missing_keys}")
-            raise HTTPException(status_code=500, detail=f"Invalid session data: missing {missing_keys}")
-
+            logger.error("No session data available. Please upload files first.")
+            raise HTTPException(status_code=404, detail="No session data available. Please upload files first.")
+        
+        pipeline = latest_session_data["pipeline"]
+        sorted_labels = latest_session_data["sorted_labels"]
         video_path = latest_session_data["video_path"]
-        source_image_path = latest_session_data["source_image_path"]
         detected_faces = latest_session_data["detected_faces"]
-        clusters = latest_session_data["clusters"]
-        detection_artifact = latest_session_data["detection_artifact"]
-
-        # Validate file existence
-        if not os.path.exists(video_path):
-            logger.error(f"Video file not found: {video_path}")
-            raise HTTPException(status_code=404, detail=f"Video file not found: {video_path}")
-        if not os.path.exists(source_image_path):
-            logger.error(f"Source image not found: {source_image_path}")
-            raise HTTPException(status_code=404, detail=f"Source image not found: {source_image_path}")
-
+        source_path = latest_session_data["source_path"]
+        
+        logger.info(f"Session data: video_path={video_path}, detected_faces_count={len(detected_faces)}, sorted_labels={sorted_labels}, source_path={source_path}")
+        
         # Validate indices
-        logger.info(f"Received indices: {indices}")
-        face_index = indices
-        if face_index != -1:  # Check for valid single index
-            face_index = face_index - 1  # Convert to 0-based
-            if face_index < 0 or face_index >= len(detected_faces):
-                logger.warning(f"Invalid index: {indices}. Valid range: 1 to {len(detected_faces)}")
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid index: {indices}. Valid range: 1 to {len(detected_faces)}"
-                )
-
-        logger.info(f"Parsed face_index: {face_index}")
-
-        # Initialize pipeline and perform face swap
-        logger.info(f"Initializing FaceSwapPipeline with video: {video_path}")
-        pipeline = FaceSwapPipeline(video_path=video_path)
-        logger.info(f"Calling swap_faces with source_image_path: {source_image_path}, face_index: {face_index}, clusters: {clusters}")
-        swapping_artifact = pipeline.swap_faces(
-            str(source_image_path),  # Positional argument
-            face_index,  # Single integer or -1
-            clusters,
-            detection_artifact
-        )
-
-        if not swapping_artifact or not hasattr(swapping_artifact, 'final_output_video_path') or not os.path.exists(swapping_artifact.final_output_video_path):
-            logger.error(f"Face swap failed. Output video not found at: {swapping_artifact.final_output_video_path if swapping_artifact else 'None'}")
-            raise HTTPException(status_code=500, detail="Face swap failed. Output video not generated.")
-
-        output_video_path = swapping_artifact.final_output_video_path
-        logger.info(f"Face swapping complete. Output video at: {output_video_path}")
-
-        # Schedule cleanup to run after the response is sent
-        background_tasks.add_task(cleanup, video_path, source_image_path)
-
-        return FileResponse(
-            path=output_video_path,
-            filename=Path(output_video_path).name,
-            media_type="video/mp4"
-        )
-
-    except VideoProcessingException as e:
-        logger.error(f"Error in face swap endpoint: {e.args[0]}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Video Processing Error: {e.args[0]}")
+        selected_labels = []
+        if indices == -1:
+            selected_labels = sorted_labels
+            index = -1
+        else:
+            try:
+                if indices < 1 or indices > len(detected_faces):
+                    raise ValueError(f"Index out of range. Valid range: 1 to {len(detected_faces)}")
+                selected_labels = [sorted_labels[indices - 1]]
+                index = 0  # Dummy index for single face
+            except ValueError as e:
+                logger.warning(f"Invalid index input: {indices}. Error: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid index: {str(e)}")
+        
+        logger.info(f"Selected labels: {selected_labels}, index: {index}")
+        
+        # Compute swap_clusters
+        swap_clusters = {label: pipeline.clusters[label] for label in selected_labels}
+        if not swap_clusters:
+            logger.error("No valid clusters selected for face swapping.")
+            raise HTTPException(status_code=400, detail="No valid clusters selected for face swapping.")
+        
+        logger.debug(f"Swap clusters: {swap_clusters}")
+        
+        # Set static extracted_audio_path
+        from src.entity.artifact_entity import FaceDetectionArtifact
+        FaceDetectionArtifact.extracted_audio_path = pipeline.detection_artifact.extracted_audio_path
+        
+        # Perform swap
+        sf = SwapFaces(index=index, video_path=video_path, source_face_path=source_path, clusters=swap_clusters)
+        artifact = sf.video_preprocessing()
+        
+        if not artifact.final_output_video_path or not os.path.exists(artifact.final_output_video_path):
+            logger.error(f"Face swap failed. Result video not found at: {artifact.final_output_video_path}")
+            raise HTTPException(status_code=500, detail="Face swap failed. Result video not generated.")
+        
+        # Convert result video to base64 for response
+        with open(artifact.final_output_video_path, "rb") as video_file:
+            video_base64 = base64.b64encode(video_file.read()).decode("utf-8")
+        
+        logger.info(f"Face swap completed. Output video: {artifact.final_output_video_path}")
+        return JSONResponse(content={
+            "message": "Face swap completed successfully.",
+            "output_video_path": artifact.final_output_video_path,
+            "base64": f"data:video/mp4;base64,{video_base64}"
+        })
+    
     except Exception as e:
-        logger.error(f"Unexpected error in face swap: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+        logger.error(f"Error in face swap endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8004, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8002, reload=True)
