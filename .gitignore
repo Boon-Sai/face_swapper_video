@@ -4,3 +4,4 @@ __pycache__/
 artifacts
 logs
 uploads
+__pycache__

@@ -8,6 +8,8 @@ import base64
 import json
 from pathlib import Path
 import shutil
+import cv2
+import numpy as np
 
 from src.constants import ARTIFACT_DIR_PATH
 
@@ -25,6 +27,35 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Global variable to store the latest session data
 latest_session_data = {}
+
+def validate_face_in_image(image_path: str) -> bool:
+    """
+    Validates that the image at the given path contains at least one face.
+    
+    Args:
+        image_path (str): Path to the image file.
+    
+    Returns:
+        bool: True if at least one face is detected, False otherwise.
+    """
+    try:
+        # Load the image
+        image = cv2.imread(image_path)
+        if image is None:
+            logger.error(f"Failed to load image: {image_path}")
+            return False
+        
+        # Convert to grayscale for face detection
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # Load a pre-trained face detector (Haar Cascade)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        
+        return len(faces) > 0
+    except Exception as e:
+        logger.error(f"Error validating face in image {image_path}: {e}")
+        return False
 
 @app.post("/upload-video/")
 async def upload_video(video: UploadFile = File(...), source_image: UploadFile = File(...)):
@@ -81,13 +112,16 @@ async def upload_video(video: UploadFile = File(...), source_image: UploadFile =
         for label, faces in sorted(pipeline.clusters.items()):
             best_face = max(faces, key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1]))
             bbox = [int(val) for val in best_face['bbox']]
-            # Convert representative image to base64 (if available)
+            # Convert representative image to base64 (if available and contains a face)
             base64_face = ""
             face_image_path = best_face.get('image_path')
             if face_image_path and os.path.exists(face_image_path):
                 try:
-                    with open(face_image_path, "rb") as img_file:
-                        base64_face = base64.b64encode(img_file.read()).decode("utf-8")
+                    if validate_face_in_image(face_image_path):
+                        with open(face_image_path, "rb") as img_file:
+                            base64_face = base64.b64encode(img_file.read()).decode("utf-8")
+                    else:
+                        logger.warning(f"No face detected in image: {face_image_path}")
                 except Exception as e:
                     logger.warning(f"Failed to encode face image {face_image_path}: {e}")
 
@@ -241,4 +275,4 @@ async def swap_faces(indices: int = Form(...), background_tasks: BackgroundTasks
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8004, reload=True)
